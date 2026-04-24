@@ -59,44 +59,48 @@ def apply_emergency_lane_changes(
 	lcmode,
 	lctime,
 ):
-	if step % 20 != 0 or step <= em_vehicle_start_time + 800:
-		return None
+	if step <= em_vehicle_start_time + 800:
+		return None, [], False
 
 	if em_vid not in traci.vehicle.getIDList():
-		return None
+		return None, [], False
 
 	road_id = traci.vehicle.getRoadID(em_vid)
 	em_info = get_vid_info(em_vid, step)
 	car_list = traci.edge.getLastStepVehicleIDs(road_id)
+	affected_vehicles = []
+	has_vehicle_ahead = False
 
 	if not car_list:
-		return road_id
+		return road_id, affected_vehicles, True
 
 	for vid in car_list:
+		if vid == em_vid:
+			continue
+
 		res = get_vid_info(vid, step)
 		traci.vehicle.setLaneChangeMode(vid, lcmode)
-
-		if (
+		is_ahead_in_range = (
 			(res[4] - em_info[4] < detect_range)
 			and (res[4] - em_info[4] > 0)
-			and res[5] == em_info[5]
 			and res[3] > 3
-		):
+		)
+
+		if is_ahead_in_range and res[5] == em_info[5]:
+			has_vehicle_ahead = True
 			lcsl = traci.vehicle.couldChangeLane(vid, 1)
 			if lcsl:
 				traci.vehicle.changeLaneRelative(vid, 1, lctime)
-				print(f"vid:{vid},change left")
+				affected_vehicles.append(vid)
 			else:
 				traci.vehicle.changeLaneRelative(vid, -1, lctime)
-				print(f"vid:{vid},change right")
-		elif (
-			(res[4] - em_info[4] < detect_range)
-			and (res[4] - em_info[4] > 0)
-			and res[3] > 3
-		):
+				affected_vehicles.append(vid)
+		elif is_ahead_in_range:
 			if res[5] - em_info[5] > 0:
 				traci.vehicle.changeLaneRelative(vid, 1, lctime)
+				affected_vehicles.append(vid)
 			if res[5] - em_info[5] < 0:
 				traci.vehicle.changeLaneRelative(vid, -1, lctime)
+				affected_vehicles.append(vid)
 
-	return road_id
+	return road_id, affected_vehicles, not has_vehicle_ahead
