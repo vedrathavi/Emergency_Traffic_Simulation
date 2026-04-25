@@ -3,10 +3,16 @@ from traci.exceptions import FatalTraCIError
 import zlib
 
 from algorithm import (
-    apply_emergency_lane_changes,
+    CLEAR_RADIUS,
+    FREEZE_RADIUS,
+    INTERSECTION_CONTROL,
+    INTERSECTION_RADIUS,
+    BROADCAST_RADIUS,
+    RESTORE_DELAY,
+    SAFE_SPEED,
+    EmergencyController,
     configure_sumo,
     deploy_emergency_vehicle,
-    get_vid_info,
 )
 from output import flush_logs, generate_graphs, initialize_output, save_summary
 
@@ -15,10 +21,7 @@ from output import flush_logs, generate_graphs, initialize_output, save_summary
 start_gui = "True"
 em_vid="eme"
 em_vehicle_start_time = 2500  # 100x, 1200 = 12s
-end_time = 20000  
-detect_range = 90
-lctime = 3
-lcmode=0b011001000101
+end_time = 20000
 
 road_id = "E6"
 LOG_INTERVAL = 10
@@ -65,7 +68,30 @@ def main(road_id):
     was_stopped = False
     ambulance_distance_start = 0.0
     ambulance_distance_end = 0.0
+    previous_ambulance_speed = None
+    previous_smoothed_acceleration = 0.0
+    acceleration_alpha = 0.8
+    last_control_update = {
+        "state": "CRUISING",
+        "same_lane_count": 0,
+        "adjacent_lane_count": 0,
+        "vehicles_in_radius": 0,
+        "close_adjacent_vehicles": 0,
+        "affected_vehicles": [],
+    }
+    intersection_control_steps = 0
+    cumulative_vehicles_cleared = 0
+    cumulative_cleared_vehicle_ids = set()
     summary = None
+    controller = EmergencyController(
+        em_vid=em_vid,
+        broadcast_radius=BROADCAST_RADIUS,
+        intersection_radius=INTERSECTION_RADIUS,
+        clear_radius=CLEAR_RADIUS,
+        freeze_radius=FREEZE_RADIUS,
+        restore_delay=RESTORE_DELAY,
+        safe_speed=SAFE_SPEED,
+    )
 
     print("[INFO] Simulation started")
 
@@ -106,21 +132,31 @@ def main(road_id):
             else:
                 ambulance_speed = 0.0
 
-            updated_road_id, newly_affected, path_cleared = apply_emergency_lane_changes(
-                step,
-                em_vehicle_start_time,
-                em_vid,
-                detect_range,
-                lcmode,
-                lctime,
+            if previous_ambulance_speed is None:
+                raw_acceleration = 0.0
+            else:
+                raw_acceleration = ambulance_speed - previous_ambulance_speed
+            smoothed_acceleration = (
+                acceleration_alpha * previous_smoothed_acceleration
+                + (1 - acceleration_alpha) * raw_acceleration
             )
-            if updated_road_id:
-                road_id = updated_road_id
-            if newly_affected:
-                affected_vehicles.update(newly_affected)
-            if em_started and path_cleared and clearance_step is None:
+            previous_ambulance_speed = ambulance_speed
+            previous_smoothed_acceleration = smoothed_acceleration
+
+            control_update = controller.update(step)
+            last_control_update = control_update
+            if control_update["road_id"]:
+                road_id = control_update["road_id"]
+            actual_affected = set(control_update["affected_vehicles"])
+            if actual_affected:
+                affected_vehicles.update(actual_affected)
+                cumulative_cleared_vehicle_ids.update(actual_affected)
+            cumulative_vehicles_cleared = len(cumulative_cleared_vehicle_ids)
+            if em_started and control_update["path_cleared"] and clearance_step is None:
                 clearance_step = step
                 print(f"[EVENT] Path cleared at t={step}")
+            if control_update["state"] == INTERSECTION_CONTROL:
+                intersection_control_steps += 1
 
             if step % LOG_INTERVAL == 0 and step >= em_vehicle_start_time:
                 car_list = traci.edge.getLastStepVehicleIDs(road_id)
@@ -137,11 +173,21 @@ def main(road_id):
                 log_entry = {
                     "time": step,
                     "ambulance_speed": round(ambulance_speed, 3),
+                    "acceleration": round(smoothed_acceleration, 3),
+                    "speed_loss": round(max(0.0, AMBULANCE_MAX_SPEED - ambulance_speed), 3),
                     "avg_speed": round(safe_mean(sampled_speeds), 3),
                     "density": round(get_road_density(road_id, len(car_list)), 3),
                     "avg_waiting_time": round(safe_mean(sampled_waiting), 3),
                     "queue_length": int(queue_length),
                     "vehicles_sampled": len(sampled_vehicles),
+                    "vehicles_in_radius": int(last_control_update["vehicles_in_radius"]),
+                    "vehicles_cleared": int(len(actual_affected)),
+                    "cumulative_vehicles_cleared": int(cumulative_vehicles_cleared),
+                    "same_lane_density": int(last_control_update["same_lane_count"]),
+                    "adjacent_lane_density": int(last_control_update["adjacent_lane_count"]),
+                    "close_adjacent_vehicles": int(last_control_update["close_adjacent_vehicles"]),
+                    "intersection_delay": int(intersection_control_steps),
+                    "controller_state": last_control_update["state"],
                 }
                 logs.append(log_entry)
 
@@ -186,6 +232,9 @@ def main(road_id):
                 if clearance_step is not None and em_start_step is not None
                 else None
             ),
+            "intersection_delay": intersection_control_steps,
+            "corridor_violations": sum(row["close_adjacent_vehicles"] for row in logs),
+            "cumulative_vehicles_cleared": cumulative_vehicles_cleared,
         }
 
         print("[INFO] Simulation completed")

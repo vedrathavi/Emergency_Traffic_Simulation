@@ -61,6 +61,8 @@ def generate_graphs(logs, graphs_dir):
 
 	graphs_dir = Path(graphs_dir)
 	graphs_dir.mkdir(parents=True, exist_ok=True)
+	for existing_png in graphs_dir.glob("*.png"):
+		existing_png.unlink(missing_ok=True)
 
 	try:
 		import matplotlib.pyplot as plt
@@ -70,7 +72,10 @@ def generate_graphs(logs, graphs_dir):
 	times = [row["time"] for row in logs]
 	ambulance_speeds = [row["ambulance_speed"] for row in logs]
 	avg_speeds = [row["avg_speed"] for row in logs]
-	queue_lengths = [row["queue_length"] for row in logs]
+	speed_losses = [row.get("speed_loss", 0.0) for row in logs]
+	same_lane_density = [row.get("same_lane_density", 0) for row in logs]
+	adjacent_lane_density = [row.get("adjacent_lane_density", 0) for row in logs]
+	controller_states = [row.get("controller_state", "CRUISING") for row in logs]
 
 	plt.figure(figsize=(8, 4))
 	plt.plot(times, ambulance_speeds, label="Ambulance speed", linewidth=2)
@@ -85,12 +90,44 @@ def generate_graphs(logs, graphs_dir):
 	plt.close()
 
 	plt.figure(figsize=(8, 4))
-	plt.plot(times, queue_lengths, label="Queue length", color="tab:red", linewidth=2)
+	plt.plot(times, speed_losses, label="Speed loss", color="tab:orange", linewidth=2)
 	plt.xlabel("Time (s)")
-	plt.ylabel("Vehicles")
-	plt.title("Queue Length vs Time")
+	plt.ylabel("Speed Loss (m/s)")
+	plt.title("Speed Loss vs Time")
 	plt.grid(alpha=0.3)
 	plt.legend()
 	plt.tight_layout()
-	plt.savefig(graphs_dir / "queue_vs_time.png", dpi=150)
+	plt.savefig(graphs_dir / "speed_loss_vs_time.png", dpi=150)
+	plt.close()
+
+	plt.figure(figsize=(8, 4))
+	plt.plot(times, same_lane_density, label="Same lane density", linewidth=2)
+	plt.plot(times, adjacent_lane_density, label="Adjacent lane density", linewidth=2)
+	plt.xlabel("Time (s)")
+	plt.ylabel("Vehicle count")
+	plt.title("Lane Density vs Time")
+	plt.grid(alpha=0.3)
+	plt.legend()
+	plt.tight_layout()
+	plt.savefig(graphs_dir / "lane_density_vs_time.png", dpi=150)
+	plt.close()
+
+	state_to_y = {
+		"CRUISING": 0,
+		"CLEARING_PATH": 1,
+		"INTERSECTION_APPROACH": 2,
+		"INTERSECTION_CONTROL": 3,
+		"EXIT_INTERSECTION": 4,
+	}
+	state_series = [state_to_y.get(state, 0) for state in controller_states]
+
+	plt.figure(figsize=(10, 4))
+	plt.step(times, state_series, where="post", linewidth=2, color="tab:brown")
+	plt.yticks(list(state_to_y.values()), list(state_to_y.keys()))
+	plt.xlabel("Time (s)")
+	plt.ylabel("Controller state")
+	plt.title("Intersection Events Timeline")
+	plt.grid(alpha=0.3)
+	plt.tight_layout()
+	plt.savefig(graphs_dir / "intersection_timeline.png", dpi=150)
 	plt.close()
