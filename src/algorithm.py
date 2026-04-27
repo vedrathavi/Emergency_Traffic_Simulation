@@ -407,7 +407,7 @@ class EmergencyController:
 			return False
 
 		self._exit_counter += 1
-		return self._exit_counter >= 10
+		return self._exit_counter >= 50
 
 	def _restore_intersection(self):
 		self.last_tls_id = self.current_tls_id

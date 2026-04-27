@@ -30,6 +30,26 @@ LOG_FLUSH_INTERVAL = 50
 SAMPLE_RATE = 0.2
 STOP_SPEED_THRESHOLD = 0.1
 AMBULANCE_MAX_SPEED = 33.0
+USE_CONTROLLER = True
+
+
+def prompt_run_mode(default_use_controller=USE_CONTROLLER):
+    print("\nSelect simulation mode:")
+    print("1) With algorithm controller")
+    print("2) Baseline (without controller)")
+
+    default_option = "1" if default_use_controller else "2"
+    while True:
+        choice = input(f"Enter choice [1/2] (default {default_option}): ").strip()
+        if choice == "":
+            choice = default_option
+        if choice == "1":
+            print("[INFO] Running WITH algorithm controller")
+            return True
+        if choice == "2":
+            print("[INFO] Running BASELINE without controller")
+            return False
+        print("[WARN] Invalid choice. Please enter 1 or 2.")
 
 
 def is_sampled_vehicle(vid, sample_rate=SAMPLE_RATE):
@@ -51,8 +71,9 @@ def get_road_density(road_id, vehicle_count):
     return vehicle_count / road_length_km
 
 
-def main(road_id):
-    output_paths = initialize_output("output")
+def main(road_id, use_controller=USE_CONTROLLER):
+    run_type = "with_algo" if use_controller else "baseline"
+    output_paths = initialize_output(f"output/{run_type}")
     logs = []
     step = 0
     em_started = False
@@ -83,14 +104,18 @@ def main(road_id):
     cumulative_vehicles_cleared = 0
     cumulative_cleared_vehicle_ids = set()
     summary = None
-    controller = EmergencyController(
-        em_vid=em_vid,
-        broadcast_radius=BROADCAST_RADIUS,
-        intersection_radius=INTERSECTION_RADIUS,
-        clear_radius=CLEAR_RADIUS,
-        freeze_radius=FREEZE_RADIUS,
-        restore_delay=RESTORE_DELAY,
-        safe_speed=SAFE_SPEED,
+    controller = (
+        EmergencyController(
+            em_vid=em_vid,
+            broadcast_radius=BROADCAST_RADIUS,
+            intersection_radius=INTERSECTION_RADIUS,
+            clear_radius=CLEAR_RADIUS,
+            freeze_radius=FREEZE_RADIUS,
+            restore_delay=RESTORE_DELAY,
+            safe_speed=SAFE_SPEED,
+        )
+        if use_controller
+        else None
     )
 
     print("[INFO] Simulation started")
@@ -106,6 +131,10 @@ def main(road_id):
 
             if step == em_vehicle_start_time:
                 deploy_emergency_vehicle(em_vid, start_gui)
+                if use_controller:
+                    traci.vehicle.setParameter(em_vid, "device.bluelight.reactiondist", str(90))
+                else:
+                    traci.vehicle.setParameter(em_vid, "device.bluelight.reactiondist", str(0))
                 em_started = True
                 em_start_step = step
 
@@ -121,6 +150,8 @@ def main(road_id):
 
             if em_in_network:
                 ambulance_speed = traci.vehicle.getSpeed(em_vid)
+                if not use_controller:
+                    traci.vehicle.setSpeed(em_vid, -1)
                 ambulance_speeds.append(ambulance_speed)
                 if ambulance_speed <= STOP_SPEED_THRESHOLD:
                     if not was_stopped:
@@ -143,7 +174,19 @@ def main(road_id):
             previous_ambulance_speed = ambulance_speed
             previous_smoothed_acceleration = smoothed_acceleration
 
-            control_update = controller.update(step)
+            if use_controller:
+                control_update = controller.update(step)
+            else:
+                control_update = {
+                    "road_id": traci.vehicle.getRoadID(em_vid) if em_vid in traci.vehicle.getIDList() else None,
+                    "affected_vehicles": [],
+                    "path_cleared": False,
+                    "state": "NO_CONTROL",
+                    "same_lane_count": 0,
+                    "adjacent_lane_count": 0,
+                    "vehicles_in_radius": 0,
+                    "close_adjacent_vehicles": 0,
+                }
             last_control_update = control_update
             if control_update["road_id"]:
                 road_id = control_update["road_id"]
@@ -255,4 +298,5 @@ def main(road_id):
 
 
 if __name__ == "__main__":
-    main(road_id)
+    selected_use_controller = prompt_run_mode(USE_CONTROLLER)
+    main(road_id, use_controller=selected_use_controller)
