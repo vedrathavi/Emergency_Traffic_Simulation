@@ -1,15 +1,15 @@
 {
-  "total_time": 13490,
-  "travel_time": 10990,
-  "ambulance_avg_speed": 13.918,
+  "total_time": 1019,
+  "travel_time": 769,
+  "ambulance_avg_speed": 12.751,
   "stops_count": 1,
-  "delay_time": 10943.66,
-  "avg_vehicle_speed": 11.27,
-  "avg_waiting_time": 2.379,
+  "delay_time": 739.384,
+  "avg_vehicle_speed": 13.57,
+  "avg_waiting_time": 2.374,
   "vehicles_affected": 0,
-  "avg_delay_other_vehicles": 2.379,
+  "avg_delay_other_vehicles": 2.374,
   "clearance_time": null,
   "intersection_delay": 0,
-  "corridor_violations": 0,
+  "corridor_violations": 88,
   "cumulative_vehicles_cleared": 0
 }

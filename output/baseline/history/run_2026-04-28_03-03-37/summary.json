@@ -1,0 +1,15 @@
+{
+  "total_time": 1013,
+  "travel_time": 763,
+  "ambulance_avg_speed": 12.455,
+  "stops_count": 1,
+  "delay_time": 734.298,
+  "avg_vehicle_speed": 13.205,
+  "avg_waiting_time": 1.904,
+  "vehicles_affected": 0,
+  "avg_delay_other_vehicles": 1.904,
+  "clearance_time": null,
+  "intersection_delay": 0,
+  "corridor_violations": 0,
+  "cumulative_vehicles_cleared": 0
+}

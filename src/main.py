@@ -20,7 +20,7 @@ from output import flush_logs, generate_graphs, initialize_output, save_summary
 
 start_gui = "True"
 em_vid="eme"
-em_vehicle_start_time = 2500  # 100x, 1200 = 12s
+em_vehicle_start_time = 250  # 100x, 1200 = 12s
 end_time = 20000
 
 road_id = "E6"
@@ -177,19 +177,53 @@ def main(road_id, use_controller=USE_CONTROLLER):
             if use_controller:
                 control_update = controller.update(step)
             else:
+                # Baseline mode: still calculate vehicle counts for metrics (not for control)
+                em_road_id = traci.vehicle.getRoadID(em_vid) if em_vid in traci.vehicle.getIDList() else None
+                same_lane_count = 0
+                adjacent_lane_count = 0
+                close_adjacent_count = 0
+                
+                if em_road_id and em_vid in traci.vehicle.getIDList():
+                    try:
+                        em_lane_idx = traci.vehicle.getLaneIndex(em_vid)
+                        em_pos = traci.vehicle.getLanePosition(em_vid)
+                        
+                        # Count vehicles ahead in same and adjacent lanes (broadcast_radius = 80)
+                        for vid in traci.edge.getLastStepVehicleIDs(em_road_id):
+                            if vid == em_vid:
+                                continue
+                            veh_pos = traci.vehicle.getLanePosition(vid)
+                            delta = veh_pos - em_pos
+                            if delta <= 0 or delta > BROADCAST_RADIUS:
+                                continue
+                            veh_lane_idx = traci.vehicle.getLaneIndex(vid)
+                            if veh_lane_idx == em_lane_idx:
+                                same_lane_count += 1
+                            elif abs(veh_lane_idx - em_lane_idx) == 1:
+                                adjacent_lane_count += 1
+                                if delta < 30:
+                                    close_adjacent_count += 1
+                    except:
+                        pass
+                
                 control_update = {
-                    "road_id": traci.vehicle.getRoadID(em_vid) if em_vid in traci.vehicle.getIDList() else None,
+                    "road_id": em_road_id,
                     "affected_vehicles": [],
                     "path_cleared": False,
                     "state": "NO_CONTROL",
-                    "same_lane_count": 0,
-                    "adjacent_lane_count": 0,
-                    "vehicles_in_radius": 0,
-                    "close_adjacent_vehicles": 0,
+                    "same_lane_count": same_lane_count,
+                    "adjacent_lane_count": adjacent_lane_count,
+                    "vehicles_in_radius": same_lane_count + adjacent_lane_count,
+                    "close_adjacent_vehicles": close_adjacent_count,
                 }
             last_control_update = control_update
             if control_update["road_id"]:
                 road_id = control_update["road_id"]
+            
+            # Always track ambulance's current road (for both modes) to get accurate density
+            if em_vid in traci.vehicle.getIDList():
+                road_id = traci.vehicle.getRoadID(em_vid)
+            
             actual_affected = set(control_update["affected_vehicles"])
             if actual_affected:
                 affected_vehicles.update(actual_affected)
@@ -212,6 +246,10 @@ def main(road_id, use_controller=USE_CONTROLLER):
                 queue_length = sum(
                     1 for vid in car_list if traci.vehicle.getSpeed(vid) <= STOP_SPEED_THRESHOLD
                 )
+                
+                # DEBUG: show which road and vehicle count is being measured
+                if step % (LOG_INTERVAL * 5) == 0:
+                    print(f"[DEBUG] Road: {road_id}, Vehicles on road: {len(car_list)}, Density: {get_road_density(road_id, len(car_list)):.3f}")
 
                 log_entry = {
                     "time": step,

@@ -35,6 +35,7 @@ def configure_sumo(start_gui, config_path="cfg/emergency.city.sumo.cfg"):
 			sumo_exe,
 			"-c",
 			config_path,
+			"--step-length", "0.1",  
 			"--lanechange.duration",
 			"2",
 			"--random",
@@ -407,7 +408,7 @@ class EmergencyController:
 			return False
 
 		self._exit_counter += 1
-		return self._exit_counter >= 50
+		return self._exit_counter >= 10
 
 	def _restore_intersection(self):
 		self.last_tls_id = self.current_tls_id
